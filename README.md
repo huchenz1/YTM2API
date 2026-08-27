@@ -26,7 +26,7 @@ Mirasonic  (FastAPI, your machine)
 ```
 
 - **Single Python service.** One `docker compose up`. About 2,200 lines of
-  code, 148 tests, one SQLite file.
+  code, 149 tests, one SQLite file.
 - **Nothing is written to disk except the library.** The container runs
   `read_only: true`. Audio is never stored anywhere.
 - **Anonymous upstream.** Not a single cookie leaves this server toward
@@ -156,7 +156,7 @@ Details, scoring and the re-import model: [docs/SPOTIFY-IMPORT.md](docs/SPOTIFY-
 
 ```sh
 pip install -r requirements.txt
-python -m pytest -q            # 148 tests, no network
+python -m pytest -q            # 149 tests, no network
 python -m pytest -m live       # hits YouTube for real
 ```
 
