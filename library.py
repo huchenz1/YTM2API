@@ -13,7 +13,7 @@ import threading
 from datetime import datetime, timezone
 from typing import Optional
 
-DEFAULT_DB_PATH = "/data/rilyafy.db"
+DEFAULT_DB_PATH = "/data/mirasonic.db"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS songs (
@@ -74,7 +74,7 @@ class Library:
     """
 
     def __init__(self, path: Optional[str] = None):
-        self.path = path or os.environ.get("RILYAFY_DB", DEFAULT_DB_PATH)
+        self.path = path or os.environ.get("MIRASONIC_DB", DEFAULT_DB_PATH)
         directory = os.path.dirname(self.path)
         if directory:
             os.makedirs(directory, exist_ok=True)

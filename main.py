@@ -1,4 +1,4 @@
-"""RilyaFy worker: anonymous YouTube Music search + stream proxy.
+"""Mirasonic worker: anonymous YouTube Music search + stream proxy.
 
 GET /search?q=...&limit=..  -> {"tracks": [...]}
 GET /stream/{video_id}      -> proxied audio bytes (Range-aware)
@@ -322,7 +322,7 @@ async def root():
     a browser answers a bare 404 — which reads as "the server is broken" twice
     out of two. This page does nothing except confirm the process is alive."""
     return Response(
-        "RilyaFy worker.\n\n"
+        "Mirasonic worker.\n\n"
         "There is no web UI and there never will be: playback happens in a\n"
         "Subsonic client. The API lives at /rest/{action}.view — point your\n"
         "client at this address.\n",

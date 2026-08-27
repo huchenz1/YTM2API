@@ -169,7 +169,7 @@ marked as such in the code.
 
 ## Storage
 
-One SQLite file, `/data/rilyafy.db`, in the only writable mount. The container
+One SQLite file, `/data/mirasonic.db`, in the only writable mount. The container
 itself stays `read_only: true`. Schema: `songs`, `playlists`, `playlist_items`,
 `starred`, `spotify_map` — see [SUBSONIC.md](SUBSONIC.md) §4.
 

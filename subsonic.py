@@ -35,7 +35,7 @@ NAMESPACE = "http://subsonic.org/restapi"
 PROTOCOL_VERSION = "1.16.1"  # Amperfy: below 1.13.0 falls back to plaintext
                               # password, below 1.14.0 stops expecting an id
                               # in createPlaylist's response (docs/SUBSONIC.md §2).
-SERVER_VERSION = "1.0.0"
+SERVER_VERSION = "0.1.0"
 
 # search3 → up to 3 InnerTube pages per request (docs/SUBSONIC.md §5).
 MAX_SEARCH_CALLS = 3
@@ -112,7 +112,7 @@ router = APIRouter(lifespan=_lifespan)
 # unit tests that never touch a library endpoint never touch a DB file. Tests
 # that do exercise the library assign their own `library.Library(tmp_path)`
 # here directly (see test_subsonic.py) instead of relying on the default
-# RILYAFY_DB path.
+# MIRASONIC_DB path.
 # ---------------------------------------------------------------------------
 
 _library: Optional[library.Library] = None
@@ -184,7 +184,7 @@ def _root(status: str) -> ET.Element:
         "xmlns": NAMESPACE,
         "status": status,
         "version": PROTOCOL_VERSION,
-        "type": "rilyafy",
+        "type": "mirasonic",
         "serverVersion": SERVER_VERSION,
     })
 

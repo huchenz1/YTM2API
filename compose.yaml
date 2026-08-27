@@ -1,10 +1,10 @@
-name: rilyafy
+name: mirasonic
 
 services:
   worker:
     build:
       context: .
-    image: rilyafy-worker:0.1.0
+    image: mirasonic:0.1.0
     environment:
       # Mandatory: without them the server refuses to start. Set them in a
       # .env file next to this one — see .env.example.
@@ -13,6 +13,7 @@ services:
       # Must match the country this machine reaches YouTube from, or search
       # will return tracks that then fail to resolve.
       REGION: ${REGION:?set REGION in .env, e.g. US}
+      MIRASONIC_DB: /data/mirasonic.db
       HOME: /tmp
       HOST: 0.0.0.0
       PORT: 8080

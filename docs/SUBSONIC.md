@@ -58,7 +58,7 @@ turns into an internal "data not found".
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
-<subsonic-response xmlns="http://subsonic.org/restapi" status="ok" version="1.16.1" type="rilyafy" serverVersion="1.0.0">
+<subsonic-response xmlns="http://subsonic.org/restapi" status="ok" version="1.16.1" type="mirasonic" serverVersion="0.1.0">
   …
 </subsonic-response>
 ```
@@ -221,7 +221,7 @@ The journal is WAL. There are two writers — the server and the separate import
 process — and in the default mode the second would lock the whole database and
 a client would hit `database is locked` mid-song.
 
-The file is `/data/rilyafy.db` inside the container. The container stays
+The file is `/data/mirasonic.db` inside the container. The container stays
 `read_only: true`; only the mounted volume is writable.
 
 `position` is always a dense range `0..n-1`. The order is recomputed in full on
@@ -262,7 +262,7 @@ Connection check and the way a client learns the server version. No parameters
 beyond credentials.
 
 ```xml
-<subsonic-response xmlns="http://subsonic.org/restapi" status="ok" version="1.16.1" type="rilyafy" serverVersion="1.0.0"/>
+<subsonic-response xmlns="http://subsonic.org/restapi" status="ok" version="1.16.1" type="mirasonic" serverVersion="0.1.0"/>
 ```
 
 With wrong credentials: `status="failed"` and `<error code="40" .../>`, still at

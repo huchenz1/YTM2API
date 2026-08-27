@@ -1,0 +1,36 @@
+name: Client compatibility report
+description: Tell us whether Mirasonic works with another Subsonic client.
+title: "[Client]: "
+labels: [compatibility]
+body:
+  - type: input
+    id: client
+    attributes:
+      label: Client, version, and platform
+      placeholder: Symfonium 12.x on Android 16
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Compatibility
+      options:
+        - Works
+        - Works with limitations
+        - Does not connect
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: What did you test?
+      description: Mention search, playback, seeking, playlists, stars, artwork, and library sync where relevant.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Sensitive information
+      options:
+        - label: I removed credentials, tokens, signed URLs, public IP addresses, and `.env` contents.
+          required: true

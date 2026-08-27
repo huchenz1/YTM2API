@@ -117,10 +117,21 @@ def test_path_without_view_suffix_is_not_routed():
 # response shape: version, root element, content type
 # ---------------------------------------------------------------------------
 
-def test_ping_response_declares_version_1_16_1():
+def test_ping_response_declares_mirasonic_identity_and_versions():
     resp = client.get("/rest/ping.view", params=token_params())
     assert 'version="1.16.1"' in resp.text
+    assert 'type="mirasonic"' in resp.text
+    assert 'serverVersion="0.1.0"' in resp.text
     assert resp.headers["content-type"].startswith("text/xml")
+
+
+def test_library_path_can_be_configured_with_mirasonic_env(monkeypatch, tmp_path):
+    path = tmp_path / "mirasonic.db"
+    monkeypatch.setenv("MIRASONIC_DB", str(path))
+
+    instance = library.Library()
+
+    assert instance.path == str(path)
 
 
 # ---------------------------------------------------------------------------

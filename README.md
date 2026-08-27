@@ -1,6 +1,8 @@
-# RilyaFy
+# Mirasonic
 
 **A Subsonic server backed by YouTube Music.**
+
+![Mirasonic demo](docs/assets/mirasonic-demo.gif)
 
 Point Amperfy, Symfonium, substreamer, play:Sub or any other Subsonic client at
 this server and the whole YouTube Music catalogue becomes searchable and
@@ -16,7 +18,7 @@ YouTube Music on the other.
 Subsonic client (phone, desktop)
      │  GET /rest/{action}.view?u=…&t=…&s=…
      ▼
-RilyaFy  (FastAPI, your machine)
+Mirasonic  (FastAPI, your machine)
      ├─ library  → SQLite: playlists, stars, track metadata
      ├─ search   → InnerTube (music.youtube.com), Songs filter
      ├─ browse   → artists and albums derived from the library
@@ -37,8 +39,8 @@ RilyaFy  (FastAPI, your machine)
 Requires Docker and a machine that can reach YouTube.
 
 ```sh
-git clone https://github.com/rilya888-pixel/RilyaFy.git
-cd RilyaFy
+git clone https://github.com/rilya888/Mirasonic.git
+cd Mirasonic
 cp .env.example .env
 $EDITOR .env          # set SUBSONIC_USER, SUBSONIC_PASSWORD and REGION
 docker compose up -d --build
@@ -47,7 +49,7 @@ docker compose up -d --build
 The server now listens on `127.0.0.1:8094`. In your Subsonic client, add a
 server with that address and the credentials you just set.
 
-The library database lands in `./data/rilyafy.db` — a plain directory, so a
+The library database lands in `./data/mirasonic.db` — a plain directory, so a
 backup is one `cp`. Point `LIBRARY_PATH` elsewhere if you prefer.
 
 `REGION` matters more than it looks. It must be the two-letter country code of
@@ -92,14 +94,15 @@ WireGuard VPN or a reverse proxy terminating TLS works just as well.
 | `HOST` / `PORT` | `127.0.0.1` / `8080` | Bind address inside the process. |
 | `BIND_ADDRESS` / `HOST_PORT` | `127.0.0.1` / `8094` | Where compose publishes the port on the host. |
 | `LIBRARY_PATH` | `./data` | Host directory holding the library database. |
-| `RILYAFY_DB` | `/data/rilyafy.db` | Database path inside the container. |
+| `MIRASONIC_DB` | `/data/mirasonic.db` | Database path inside the container. |
 
 There are no defaults for the credentials. Without them the server refuses to
 start rather than letting anything through.
 
 ## Client setup
 
-Tested against **Amperfy** (iOS, GPL-3.0). Two settings matter:
+Tested against **Amperfy** (iOS, GPL-3.0). Other Subsonic clients are not yet
+verified. Two settings matter:
 
 - **Audio format: as on the server.** There is no transcoding here — the same
   AAC bitstream that came from YouTube is served, repacked into ADTS. Asking
@@ -109,8 +112,8 @@ Tested against **Amperfy** (iOS, GPL-3.0). Two settings matter:
   resolves from one address, which is how you earn a captcha for the entire
   machine.
 
-Other Subsonic clients should work — the endpoint list was derived from
-Amperfy's source, so a client using methods outside those 28 may find gaps.
+Other Subsonic clients may work — the endpoint list was derived from Amperfy's
+source, so a client using methods outside those 28 may find gaps.
 See [docs/SUBSONIC.md](docs/SUBSONIC.md).
 
 ## Importing Spotify playlists
@@ -193,3 +196,6 @@ and when they do, this breaks. That is the deal.
 ## License
 
 GPL-3.0. See [LICENSE](LICENSE).
+
+Mirasonic is an independent project and is not affiliated with, endorsed by,
+or sponsored by YouTube, Google, Subsonic, or the developers of Amperfy.
