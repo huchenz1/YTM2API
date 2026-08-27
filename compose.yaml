@@ -23,15 +23,15 @@ services:
     tmpfs:
       - /tmp
     # The only place this server writes to disk is the library database
-    # (docs/SUBSONIC.md §4). read_only stays on: only this mounted volume is
-    # writable, not the container as a whole. Audio is never written anywhere.
+    # (docs/SUBSONIC.md §4). read_only stays on: only this mount is writable,
+    # not the container as a whole. Audio is never written anywhere.
+    #
+    # A plain bind mount rather than a named volume, so a backup stays one
+    # `cp`. Override LIBRARY_PATH in .env to put it somewhere else.
     volumes:
-      - library:/data
+      - ${LIBRARY_PATH:-./data}:/data
     # Bound to loopback by default: this server has no transport security of
     # its own and is meant to sit behind Tailscale, a VPN or a reverse proxy.
     # See README.md — "Exposing it".
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${HOST_PORT:-8094}:8080"
-
-volumes:
-  library:

@@ -13,3 +13,9 @@ LOCAL.md
 
 # macOS
 .DS_Store
+
+# Library database (path set by LIBRARY_PATH in .env)
+data/
+
+# Local compose overrides
+compose.override.yaml

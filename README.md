@@ -37,7 +37,7 @@ RilyaFy  (FastAPI, your machine)
 Requires Docker and a machine that can reach YouTube.
 
 ```sh
-git clone https://github.com/<you>/RilyaFy.git
+git clone https://github.com/rilya888-pixel/RilyaFy.git
 cd RilyaFy
 cp .env.example .env
 $EDITOR .env          # set SUBSONIC_USER, SUBSONIC_PASSWORD and REGION
@@ -46,6 +46,9 @@ docker compose up -d --build
 
 The server now listens on `127.0.0.1:8094`. In your Subsonic client, add a
 server with that address and the credentials you just set.
+
+The library database lands in `./data/rilyafy.db` — a plain directory, so a
+backup is one `cp`. Point `LIBRARY_PATH` elsewhere if you prefer.
 
 `REGION` matters more than it looks. It must be the two-letter country code of
 the country **this machine** reaches YouTube from: stream resolution happens
@@ -88,7 +91,8 @@ WireGuard VPN or a reverse proxy terminating TLS works just as well.
 | `REGION` | `US` | Two-letter country code for search. Must match where this machine reaches YouTube from. |
 | `HOST` / `PORT` | `127.0.0.1` / `8080` | Bind address inside the process. |
 | `BIND_ADDRESS` / `HOST_PORT` | `127.0.0.1` / `8094` | Where compose publishes the port on the host. |
-| `RILYAFY_DB` | `/data/rilyafy.db` | Library database path. |
+| `LIBRARY_PATH` | `./data` | Host directory holding the library database. |
+| `RILYAFY_DB` | `/data/rilyafy.db` | Database path inside the container. |
 
 There are no defaults for the credentials. Without them the server refuses to
 start rather than letting anything through.
