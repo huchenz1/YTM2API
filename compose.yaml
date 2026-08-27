@@ -1,0 +1,37 @@
+name: rilyafy
+
+services:
+  worker:
+    build:
+      context: .
+    image: rilyafy-worker:0.1.0
+    environment:
+      # Mandatory: without them the server refuses to start. Set them in a
+      # .env file next to this one — see .env.example.
+      SUBSONIC_USER: ${SUBSONIC_USER:?set SUBSONIC_USER in .env}
+      SUBSONIC_PASSWORD: ${SUBSONIC_PASSWORD:?set SUBSONIC_PASSWORD in .env}
+      # Must match the country this machine reaches YouTube from, or search
+      # will return tracks that then fail to resolve.
+      REGION: ${REGION:?set REGION in .env, e.g. US}
+      HOME: /tmp
+      HOST: 0.0.0.0
+      PORT: 8080
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    # The only place this server writes to disk is the library database
+    # (docs/SUBSONIC.md §4). read_only stays on: only this mounted volume is
+    # writable, not the container as a whole. Audio is never written anywhere.
+    volumes:
+      - library:/data
+    # Bound to loopback by default: this server has no transport security of
+    # its own and is meant to sit behind Tailscale, a VPN or a reverse proxy.
+    # See README.md — "Exposing it".
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${HOST_PORT:-8094}:8080"
+
+volumes:
+  library:

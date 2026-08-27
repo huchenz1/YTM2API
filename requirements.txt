@@ -1,0 +1,7 @@
+fastapi==0.115.0
+uvicorn==0.30.5
+httpx==0.27.2
+# ponytail: yt-dlp is deliberately unpinned. YouTube breaks extraction on a
+# regular basis, and the normal fix is rebuilding the image against a fresh
+# version. Pinning it here would guarantee breakage, not reproducibility.
+yt-dlp
