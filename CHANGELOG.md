@@ -2,6 +2,37 @@
 
 All notable changes to Mirasonic are documented here.
 
+## [0.2.0] - 2026-08-31
+
+### Added
+
+- Optional weekly discovery agent (`--profile agent`): syncs listening
+  history to ListenBrainz, requests recommendations and fresh releases, and
+  builds a `Discoveries` playlist from tracks it can match on YouTube Music.
+  Off by default; the playback server never imports it or needs its
+  credentials.
+- Local, network-free library ranking (`music_agent.py rankings`) by play
+  frequency, recency, and starred status.
+- Real `scrobble.view` handling: playing-now pings from clients that never
+  send `submission=true` (Amperfy included) now credit a listen.
+
+### Fixed
+
+- Scrobbles synced to ListenBrainz hourly instead of only once a completed
+  discovery week rolled over, which had delayed a Monday-afternoon listen by
+  up to two weeks before it could affect recommendations.
+- The agent now logs at INFO level, so a successful run leaves a trace
+  instead of looking identical to a container that never started.
+
+### Known limitations
+
+- Other Subsonic clients have not been verified yet.
+- Age-restricted tracks cannot be resolved anonymously.
+- There is no multi-user support, transcoding, lyrics, podcasts, or radio.
+- YouTube internal interfaces can change without notice and temporarily break playback.
+
+[0.2.0]: https://github.com/rilya888/Mirasonic/releases/tag/v0.2.0
+
 ## [0.1.0] - 2026-08-27
 
 ### Added

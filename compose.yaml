@@ -4,7 +4,7 @@ services:
   worker:
     build:
       context: .
-    image: mirasonic:0.1.0
+    image: mirasonic:0.2.0
     environment:
       # Mandatory: without them the server refuses to start. Set them in a
       # .env file next to this one — see .env.example.
@@ -43,7 +43,7 @@ services:
   # The discovery agent shares the WAL database with worker, but has no HTTP
   # surface and does not need worker to be available to rank or persist data.
   agent:
-    image: mirasonic:0.1.0
+    image: mirasonic:0.2.0
     profiles: [agent]
     build:
       context: .

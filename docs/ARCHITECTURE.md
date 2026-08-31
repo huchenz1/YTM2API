@@ -294,7 +294,7 @@ private API did.
 
 ## Tests
 
-249 tests, none of which touch the network. Live tests are marked `live` and
+263 tests, none of which touch the network. Live tests are marked `live` and
 deselected by default.
 
 - Search parsing: fixture parsing, ATV filtering, config caching, pagination,
