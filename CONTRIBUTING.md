@@ -1,7 +1,8 @@
 # Contributing to Mirasonic
 
 Thanks for helping improve Mirasonic. The project deliberately stays small: one
-listener, one library, and one Python service.
+listener, one SQLite library, one playback service, and one optional persistent
+Python service for weekly recommendations.
 
 ## Before opening an issue
 
@@ -13,9 +14,14 @@ listener, one library, and one Python service.
 ## Development
 
 ```sh
-pip install -r requirements.txt
+pip install -r requirements.txt pytest pytest-asyncio
 python -m pytest -q
 ```
+
+`requirements.txt` holds runtime dependencies only, so the test tools are
+installed alongside it. Without `pytest-asyncio` the agent's async tests do not
+fail — they error out as unsupported, which is easy to mistake for a broken
+branch.
 
 The default test suite must not access the network. Tests that intentionally use
 YouTube belong under the existing `live` marker and run only with

@@ -8,12 +8,15 @@ main.get_song_details) and passes finished values in. library.py knows only
 about SQLite.
 """
 import os
+import secrets
 import sqlite3
 import threading
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
 DEFAULT_DB_PATH = "/data/mirasonic.db"
+WEEKLY_RUN_LEASE_MS = 30 * 60 * 1000
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS songs (
@@ -54,6 +57,40 @@ CREATE TABLE IF NOT EXISTS spotify_map (
   song_id     TEXT NOT NULL REFERENCES songs(id),
   mapped_at   TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS listening_events (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  song_id        TEXT NOT NULL REFERENCES songs(id),
+  played_at_ms   INTEGER NOT NULL,
+  external_sent_at_ms INTEGER,
+  created_at     TEXT NOT NULL,
+  UNIQUE(song_id, played_at_ms)
+);
+CREATE INDEX IF NOT EXISTS listening_events_played_at_idx
+  ON listening_events(played_at_ms);
+CREATE INDEX IF NOT EXISTS listening_events_unsynced_idx
+  ON listening_events(external_sent_at_ms, id);
+
+CREATE TABLE IF NOT EXISTS weekly_runs (
+  week_start     TEXT PRIMARY KEY,
+  status         TEXT NOT NULL CHECK(status IN ('running', 'completed', 'failed')),
+  playlist_id    INTEGER REFERENCES playlists(id) ON DELETE SET NULL,
+  started_at     TEXT NOT NULL,
+  finished_at    TEXT,
+  error_message  TEXT,
+  claim_token    TEXT,
+  lease_until_ms INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS recommendation_items (
+  week_start     TEXT NOT NULL REFERENCES weekly_runs(week_start) ON DELETE CASCADE,
+  position       INTEGER NOT NULL,
+  song_id        TEXT NOT NULL REFERENCES songs(id),
+  source         TEXT NOT NULL,
+  recording_mbid TEXT,
+  score          REAL NOT NULL,
+  PRIMARY KEY (week_start, position)
+);
 """
 
 
@@ -62,6 +99,10 @@ def _now_iso() -> str:
     with milliseconds (ISO8601DateFormatter.withFractionalSeconds)."""
     now = datetime.now(timezone.utc)
     return now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
+
+
+def _now_ms() -> int:
+    return time.time_ns() // 1_000_000
 
 
 class Library:
@@ -84,7 +125,19 @@ class Library:
         self._conn.execute("PRAGMA journal_mode = WAL")  # reader and writer stop blocking each other
         self._conn.execute("PRAGMA busy_timeout = 5000")  # wait for another transaction instead of failing
         self._conn.executescript(SCHEMA)
-        self._conn.commit()
+        try:
+            self._conn.execute("BEGIN IMMEDIATE")
+            columns = {
+                row["name"] for row in self._conn.execute("PRAGMA table_info(weekly_runs)")
+            }
+            if "claim_token" not in columns:
+                self._conn.execute("ALTER TABLE weekly_runs ADD COLUMN claim_token TEXT")
+            if "lease_until_ms" not in columns:
+                self._conn.execute("ALTER TABLE weekly_runs ADD COLUMN lease_until_ms INTEGER")
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
         self._lock = threading.Lock()
 
     # -- songs ---------------------------------------------------------
@@ -196,35 +249,42 @@ class Library:
         breaks that.
         """
         with self._lock:
-            prow = self._conn.execute(
-                "SELECT id FROM playlists WHERE id = ?", (playlist_id,)
-            ).fetchone()
-            if prow is None:
-                return False
-
-            current = [r["song_id"] for r in self._conn.execute(
-                "SELECT song_id FROM playlist_items WHERE playlist_id = ? ORDER BY position",
-                (playlist_id,),
-            ).fetchall()]
-
-            remove_set = set(remove_indices)
-            kept = [song_id for i, song_id in enumerate(current) if i not in remove_set]
-
-            for song_id, title, artist, album, duration, artwork_url in add_songs:
-                self._insert_song_unlocked(song_id, title, artist, album, duration, artwork_url)
-                kept.append(song_id)
-
-            self._conn.execute("DELETE FROM playlist_items WHERE playlist_id = ?", (playlist_id,))
-            self._conn.executemany(
-                "INSERT INTO playlist_items (playlist_id, position, song_id) VALUES (?, ?, ?)",
-                [(playlist_id, position, song_id) for position, song_id in enumerate(kept)],
+            updated = self._update_playlist_unlocked(
+                playlist_id, name, remove_indices, add_songs
             )
-            self._conn.execute(
-                "UPDATE playlists SET name = ?, changed_at = ? WHERE id = ?",
-                (name, _now_iso(), playlist_id),
-            )
-            self._conn.commit()
-            return True
+            if updated:
+                self._conn.commit()
+            return updated
+
+    def _update_playlist_unlocked(self, playlist_id: int, name: str,
+                                  remove_indices: list[int],
+                                  add_songs: list[tuple]) -> bool:
+        """Update a playlist while the caller owns ``self._lock`` and transaction."""
+        prow = self._conn.execute(
+            "SELECT id FROM playlists WHERE id = ?", (playlist_id,)
+        ).fetchone()
+        if prow is None:
+            return False
+
+        current = [r["song_id"] for r in self._conn.execute(
+            "SELECT song_id FROM playlist_items WHERE playlist_id = ? ORDER BY position",
+            (playlist_id,),
+        ).fetchall()]
+        remove_set = set(remove_indices)
+        kept = [song_id for i, song_id in enumerate(current) if i not in remove_set]
+        for song_id, title, artist, album, duration, artwork_url in add_songs:
+            self._insert_song_unlocked(song_id, title, artist, album, duration, artwork_url)
+            kept.append(song_id)
+        self._conn.execute("DELETE FROM playlist_items WHERE playlist_id = ?", (playlist_id,))
+        self._conn.executemany(
+            "INSERT INTO playlist_items (playlist_id, position, song_id) VALUES (?, ?, ?)",
+            [(playlist_id, position, song_id) for position, song_id in enumerate(kept)],
+        )
+        self._conn.execute(
+            "UPDATE playlists SET name = ?, changed_at = ? WHERE id = ?",
+            (name, _now_iso(), playlist_id),
+        )
+        return True
 
     # -- Spotify mappings -------------------------------------------------
 
@@ -266,3 +326,253 @@ class Library:
             "ORDER BY st.starred_at"
         ).fetchall()
         return [dict(row) for row in rows]
+
+    def record_listen(self, song: dict, played_at_ms: Optional[int]) -> bool:
+        with self._lock:
+            self._insert_song_unlocked(
+                song["id"], song["title"], song["artist"], song.get("album"),
+                song.get("duration"), song.get("artwork_url"),
+            )
+            event_ms = played_at_ms
+            if event_ms is None:
+                event_ms = _now_ms()
+                duplicate = self._conn.execute(
+                    "SELECT 1 FROM listening_events "
+                    "WHERE song_id = ? AND played_at_ms BETWEEN ? AND ? "
+                    "ORDER BY played_at_ms DESC LIMIT 1",
+                    (song["id"], event_ms - 30_000, event_ms),
+                ).fetchone()
+                if duplicate is not None:
+                    self._conn.commit()
+                    return False
+            cursor = self._conn.execute(
+                "INSERT OR IGNORE INTO listening_events "
+                "(song_id, played_at_ms, created_at) VALUES (?, ?, ?)",
+                (song["id"], event_ms, _now_iso()),
+            )
+            self._conn.commit()
+            return cursor.rowcount == 1
+
+    def get_listen_stats(self, since_ms: int) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT s.id AS song_id, s.title, s.artist, s.album, s.duration, "
+            "COUNT(e.id) AS listen_count, MAX(e.played_at_ms) AS last_played_ms, "
+            "CASE WHEN st.song_id IS NULL THEN 0 ELSE 1 END AS starred "
+            "FROM songs s JOIN listening_events e ON e.song_id = s.id "
+            "LEFT JOIN starred st ON st.song_id = s.id "
+            "WHERE e.played_at_ms >= ? GROUP BY s.id ORDER BY s.id",
+            (since_ms,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_unsynced_listens(self, limit: int = 100) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT e.id AS event_id, e.played_at_ms, s.id AS song_id, "
+            "s.title, s.artist, s.album, s.duration "
+            "FROM listening_events e JOIN songs s ON s.id = e.song_id "
+            "WHERE e.external_sent_at_ms IS NULL ORDER BY e.id LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def mark_listens_synced(self, event_ids: list[int], synced_at_ms: int) -> None:
+        if not event_ids:
+            return
+        with self._lock:
+            self._conn.executemany(
+                "UPDATE listening_events SET external_sent_at_ms = ? WHERE id = ?",
+                [(synced_at_ms, event_id) for event_id in event_ids],
+            )
+            self._conn.commit()
+
+    # -- weekly discovery runs -----------------------------------------
+
+    def get_weekly_run(self, week_start: str) -> Optional[dict]:
+        row = self._conn.execute(
+            "SELECT * FROM weekly_runs WHERE week_start = ?", (week_start,)
+        ).fetchone()
+        return None if row is None else dict(row)
+
+    def begin_weekly_run(self, week_start: str) -> dict:
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                existing = self._conn.execute(
+                    "SELECT * FROM weekly_runs WHERE week_start = ?", (week_start,)
+                ).fetchone()
+                now_ms = _now_ms()
+                if existing is not None and (
+                    existing["status"] == "completed"
+                    or (existing["status"] == "running"
+                        and (existing["lease_until_ms"] or 0) > now_ms)
+                ):
+                    result = dict(existing)
+                    result["claimed"] = False
+                    self._conn.commit()
+                    return result
+                now = _now_iso()
+                claim_token = secrets.token_urlsafe(24)
+                self._conn.execute(
+                    "INSERT INTO weekly_runs "
+                    "(week_start, status, started_at, claim_token, lease_until_ms) "
+                    "VALUES (?, 'running', ?, ?, ?) "
+                    "ON CONFLICT(week_start) DO UPDATE SET status='running', "
+                    "started_at=excluded.started_at, finished_at=NULL, error_message=NULL, "
+                    "claim_token=excluded.claim_token, lease_until_ms=excluded.lease_until_ms",
+                    (week_start, now, claim_token, now_ms + WEEKLY_RUN_LEASE_MS),
+                )
+                result = dict(self._conn.execute(
+                    "SELECT * FROM weekly_runs WHERE week_start = ?", (week_start,)
+                ).fetchone())
+                result["claimed"] = True
+                self._conn.commit()
+                return result
+            except Exception:
+                self._conn.rollback()
+                raise
+
+    def set_weekly_run_playlist(self, week_start: str, playlist_id: int) -> None:
+        """Persist agent ownership immediately after allocating a playlist."""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE weekly_runs SET playlist_id = ? WHERE week_start = ?",
+                (playlist_id, week_start),
+            )
+            self._conn.commit()
+
+    def complete_weekly_run(self, week_start: str, playlist_id: Optional[int],
+                            items: list[dict], claim_token: Optional[str] = None) -> bool:
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN")
+                if claim_token is not None and self._conn.execute(
+                    "SELECT 1 FROM weekly_runs WHERE week_start=? AND status='running' "
+                    "AND claim_token=?", (week_start, claim_token)
+                ).fetchone() is None:
+                    self._conn.rollback()
+                    raise RuntimeError("weekly run claim is no longer active")
+                self._conn.execute(
+                    "DELETE FROM recommendation_items WHERE week_start = ?", (week_start,)
+                )
+                self._conn.executemany(
+                    "INSERT INTO recommendation_items "
+                    "(week_start, position, song_id, source, recording_mbid, score) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    [(week_start, position, item["song_id"], item["source"],
+                      item.get("recording_mbid"), item["score"])
+                     for position, item in enumerate(items)],
+                )
+                self._conn.execute(
+                    "UPDATE weekly_runs SET status='completed', playlist_id=?, finished_at=?, "
+                    "error_message=NULL WHERE week_start=?",
+                    (playlist_id, _now_iso(), week_start),
+                )
+                self._conn.commit()
+                return True
+            except Exception:
+                self._conn.rollback()
+                raise
+
+    def finalize_weekly_playlist(self, week_start: str, name: str,
+                                 add_songs: list[tuple], items: list[dict],
+                                 claim_token: Optional[str] = None) -> int:
+        """Atomically replace the agent-owned playlist and complete its run.
+
+        Ownership is established exclusively by ``weekly_runs.playlist_id``;
+        the supplied name is never used to select an existing playlist.
+        """
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN")
+                run = self._conn.execute(
+                    "SELECT playlist_id, status, claim_token FROM weekly_runs WHERE week_start = ?",
+                    (week_start,),
+                ).fetchone()
+                if run is None:
+                    raise ValueError("weekly run does not exist")
+                if claim_token is not None and (
+                    run["status"] != "running" or run["claim_token"] != claim_token
+                ):
+                    self._conn.rollback()
+                    raise RuntimeError("weekly run claim is no longer active")
+                playlist_id = run["playlist_id"]
+                if playlist_id is None:
+                    created_at = _now_iso()
+                    cursor = self._conn.execute(
+                        "INSERT INTO playlists (name, created_at, changed_at) VALUES (?, ?, ?)",
+                        (name, created_at, created_at),
+                    )
+                    playlist_id = cursor.lastrowid
+                    self._conn.execute(
+                        "UPDATE weekly_runs SET playlist_id = ? WHERE week_start = ?",
+                        (playlist_id, week_start),
+                    )
+                current_count = self._conn.execute(
+                    "SELECT COUNT(*) FROM playlist_items WHERE playlist_id = ?", (playlist_id,)
+                ).fetchone()[0]
+                if not self._update_playlist_unlocked(
+                    playlist_id, name, list(range(current_count)), add_songs
+                ):
+                    raise RuntimeError("agent playlist is missing")
+                self._conn.execute(
+                    "DELETE FROM recommendation_items WHERE week_start = ?", (week_start,)
+                )
+                self._conn.executemany(
+                    "INSERT INTO recommendation_items "
+                    "(week_start, position, song_id, source, recording_mbid, score) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    [(week_start, position, item["song_id"], item["source"],
+                      item.get("recording_mbid"), item["score"])
+                     for position, item in enumerate(items)],
+                )
+                self._conn.execute(
+                    "UPDATE weekly_runs SET status='completed', finished_at=?, error_message=NULL "
+                    "WHERE week_start=?",
+                    (_now_iso(), week_start),
+                )
+                self._conn.commit()
+                return playlist_id
+            except Exception:
+                self._conn.rollback()
+                raise
+
+    def get_weekly_recommendation_items(self, week_start: str) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT position, song_id, source, recording_mbid, score FROM recommendation_items "
+            "WHERE week_start = ? ORDER BY position",
+            (week_start,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_weekly_recommendation_count(self, week_start: str) -> int:
+        return self._conn.execute(
+            "SELECT COUNT(*) FROM recommendation_items WHERE week_start = ?", (week_start,)
+        ).fetchone()[0]
+
+    def fail_weekly_run(self, week_start: str, message: str,
+                        claim_token: Optional[str] = None) -> bool:
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE weekly_runs SET status='failed', finished_at=?, error_message=? "
+                "WHERE week_start=? AND status='running' "
+                "AND (? IS NULL OR claim_token=?)",
+                (_now_iso(), message[:500], week_start, claim_token, claim_token),
+            )
+            self._conn.commit()
+            return cursor.rowcount == 1
+
+    def get_playlist_song_ids(self) -> list[dict]:
+        playlists = self.get_playlists()
+        for playlist in playlists:
+            rows = self._conn.execute(
+                "SELECT song_id FROM playlist_items WHERE playlist_id = ? ORDER BY position",
+                (playlist["id"],),
+            ).fetchall()
+            playlist["song_ids"] = [row["song_id"] for row in rows]
+        return playlists
+
+    def get_playlist_by_name(self, name: str) -> Optional[dict]:
+        row = self._conn.execute(
+            "SELECT id FROM playlists WHERE name = ? ORDER BY id LIMIT 1", (name,)
+        ).fetchone()
+        return None if row is None else self.get_playlist(row["id"])

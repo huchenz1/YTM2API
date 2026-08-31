@@ -316,7 +316,7 @@ def test_stub_endpoints_return_empty_success(action, tag):
     assert f"<{tag}" in resp.text
 
 
-@pytest.mark.parametrize("action", ["scrobble", "setRating", "deletePodcastEpisode",
+@pytest.mark.parametrize("action", ["setRating", "deletePodcastEpisode",
                                      "getOpenSubsonicExtensions"])
 def test_noop_endpoints_return_empty_success(action):
     resp = client.get(f"/rest/{action}.view", params=token_params())
@@ -657,6 +657,151 @@ def test_star_without_song_id_is_accepted_and_ignored(lib):
     resp = client.get("/rest/star.view", params={**token_params(), "albumId": "al-deadbeef"})
     assert resp.status_code == 200
     assert 'status="ok"' in resp.text
+
+
+# ---------------------------------------------------------------------------
+# scrobble.view — completed listens are persisted; playing-now notifications
+# remain an empty success. The protocol permits repeated id/time parameters,
+# and Library.record_listen supplies idempotency for an explicit pair.
+# ---------------------------------------------------------------------------
+
+def test_scrobble_records_completed_listen(lib, monkeypatch):
+    async def details(_video_id):
+        return {"title": "One", "artist": "Artist", "duration": 180,
+                "artwork": "https://example.invalid/cover.jpg"}
+
+    monkeypatch.setattr(main, "get_song_details", details)
+    response = client.get("/rest/scrobble.view", params={
+        **token_params(), "id": "vid-1", "time": "1700000000000",
+        "submission": "true",
+    })
+    assert response.status_code == 200
+    assert lib.get_listen_stats(0)[0]["listen_count"] == 1
+
+
+@pytest.mark.parametrize("submission, should_count", [
+    ("TRUE", True),
+    ("1", True),
+    ("FALSE", False),
+    ("0", False),
+])
+def test_scrobble_submission_values_follow_protocol(lib, monkeypatch, submission,
+                                                    should_count):
+    async def meta(video_id):
+        return {"title": video_id, "artist": "Artist", "duration": 180,
+                "artwork_url": None}
+
+    monkeypatch.setattr(subsonic, "_resolve_song_meta", meta)
+    response = client.get("/rest/scrobble.view", params={
+        **token_params(), "id": f"vid-submission-{submission}",
+        "time": "1700000000000", "submission": submission,
+    })
+    assert response.status_code == 200
+    assert bool(lib.get_listen_stats(0)) is should_count
+
+
+def test_scrobble_playing_now_does_not_count(lib):
+    response = client.get("/rest/scrobble.view", params={
+        **token_params(), "id": "vid-1", "submission": "false",
+    })
+    assert response.status_code == 200
+    assert lib.get_listen_stats(0) == []
+
+
+def test_scrobble_accepts_repeated_ids_and_times(lib, monkeypatch):
+    async def meta(video_id):
+        return {"title": video_id, "artist": "Artist", "album": None,
+                "duration": 180, "artwork_url": None}
+
+    monkeypatch.setattr(subsonic, "_resolve_song_meta", meta)
+    response = client.get("/rest/scrobble.view", params=[
+        *token_params().items(), ("id", "vid-1"), ("id", "vid-2"),
+        ("time", "1700000000000"), ("time", "1700000180000"),
+        ("submission", "true"),
+    ])
+    assert response.status_code == 200
+    stats = {row["song_id"]: row["last_played_ms"]
+             for row in lib.get_listen_stats(0)}
+    assert stats == {
+        "vid-1": 1700000000000,
+        "vid-2": 1700000180000,
+    }
+
+
+def test_scrobble_missing_id_returns_error(lib):
+    response = client.get("/rest/scrobble.view", params={
+        **token_params(), "submission": "true",
+    })
+    assert response.status_code == 200
+    assert 'code="10"' in response.text
+
+
+@pytest.mark.parametrize("raw_time", ["-1", "not-a-number"])
+def test_scrobble_malformed_time_is_treated_as_absent(lib, monkeypatch, raw_time):
+    async def meta(video_id):
+        return {"title": video_id, "artist": "Artist", "duration": 180,
+                "artwork_url": None}
+
+    monkeypatch.setattr(subsonic, "_resolve_song_meta", meta)
+    response = client.get("/rest/scrobble.view", params={
+        **token_params(), "id": "vid-malformed", "time": raw_time,
+    })
+    assert response.status_code == 200
+    assert 'status="ok"' in response.text
+    assert lib.get_listen_stats(0)[0]["listen_count"] == 1
+
+
+def test_scrobble_defaults_submission_to_true(lib, monkeypatch):
+    async def meta(video_id):
+        return {"title": video_id, "artist": "Artist", "duration": 180,
+                "artwork_url": None}
+
+    monkeypatch.setattr(subsonic, "_resolve_song_meta", meta)
+    response = client.get("/rest/scrobble.view", params={
+        **token_params(), "id": "vid-default", "time": "1700000000000",
+    })
+    assert response.status_code == 200
+    assert lib.get_listen_stats(0)[0]["listen_count"] == 1
+
+
+def test_scrobble_repeated_explicit_pair_is_idempotent(lib, monkeypatch):
+    async def meta(video_id):
+        return {"title": video_id, "artist": "Artist", "duration": 180,
+                "artwork_url": None}
+
+    monkeypatch.setattr(subsonic, "_resolve_song_meta", meta)
+    params = [
+        *token_params().items(), ("id", "vid-repeat"), ("id", "vid-repeat"),
+        ("time", "1700000000000"), ("time", "1700000000000"),
+    ]
+    response = client.get("/rest/scrobble.view", params=params)
+    assert response.status_code == 200
+    assert lib.get_listen_stats(0)[0]["listen_count"] == 1
+
+
+def test_scrobble_untimed_same_song_is_deduplicated_within_30_seconds(
+        lib, monkeypatch):
+    import asyncio
+    from starlette.datastructures import QueryParams
+
+    async def meta(video_id):
+        return {"title": video_id, "artist": "Artist", "duration": 180,
+                "artwork_url": None}
+
+    now_values = iter([1700000000000, 1700000010000])
+    monkeypatch.setattr(subsonic, "_resolve_song_meta", meta)
+    monkeypatch.setattr(library, "_now_ms", lambda: next(now_values))
+
+    first = asyncio.run(subsonic._scrobble(
+        QueryParams([("id", "vid-untimed"), ("time", "broken")]),
+        None,
+    ))
+    second = asyncio.run(subsonic._scrobble(
+        QueryParams([("id", "vid-untimed")]), None
+    ))
+
+    assert first.status_code == second.status_code == 200
+    assert lib.get_listen_stats(0)[0]["listen_count"] == 1
 
 
 def test_update_playlist_add_song_missing_from_cache_falls_back_to_player(lib, monkeypatch):

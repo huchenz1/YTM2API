@@ -36,3 +36,29 @@ services:
     # See README.md — "Exposing it".
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${HOST_PORT:-8094}:8080"
+
+  # The discovery agent shares the WAL database with worker, but has no HTTP
+  # surface and does not need worker to be available to rank or persist data.
+  agent:
+    image: mirasonic:0.1.0
+    profiles: [agent]
+    build:
+      context: .
+    command: ["python", "music_agent.py", "daemon"]
+    environment:
+      MIRASONIC_DB: /data/mirasonic.db
+      REGION: ${REGION:?set REGION in .env, e.g. US}
+      LISTENBRAINZ_USER: ${LISTENBRAINZ_USER:-}
+      LISTENBRAINZ_TOKEN: ${LISTENBRAINZ_TOKEN:-}
+      AGENT_WEEKDAY: ${AGENT_WEEKDAY:-0}
+      AGENT_HOUR_UTC: ${AGENT_HOUR_UTC:-6}
+      AGENT_PLAYLIST_SIZE: ${AGENT_PLAYLIST_SIZE:-30}
+      HOME: /tmp
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - ${LIBRARY_PATH:-./data}:/data
