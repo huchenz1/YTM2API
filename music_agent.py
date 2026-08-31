@@ -304,8 +304,18 @@ async def daemon(
     """Check hourly and retry the latest scheduled run until it completes."""
     while True:
         week_start = None
+        now = now_fn()
+        # Hourly, not once a week inside run_weekly: a completed week returns
+        # early there, so scrobbles played after it would sit unsent for days.
+        # Its own try — a ListenBrainz outage must not also skip discovery.
         try:
-            now = now_fn()
+            # The only line the healthy loop prints: without it a daemon that has
+            # nothing to send is indistinguishable from one that died.
+            sent = await sync_unsent_listens(lib, lb, int(now.timestamp() * 1000))
+            logger.info("listen sync ok sent=%d", sent)
+        except Exception as exc:
+            logger.error("listen sync failed error_type=%s", type(exc).__name__)
+        try:
             week_start, _scheduled = scheduled_week(now, config.weekday, config.hour_utc)
             run = lib.get_weekly_run(week_start)
             if run is None or run["status"] != "completed":
@@ -345,6 +355,15 @@ def cli(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("rankings", "weekly", "daemon"))
     args = parser.parse_args(argv)
+    # Without a handler the daemon's logger drops everything below WARNING, so
+    # a container that is syncing listens hourly looks identical to one that
+    # has silently stopped. rankings prints JSON to stdout — keep it clean.
+    if args.command != "rankings":
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(name)s %(message)s",
+            stream=os.sys.stderr,
+        )
     requires_listenbrainz = args.command in {"weekly", "daemon"}
     try:
         config = agent_config(require_listenbrainz=requires_listenbrainz)

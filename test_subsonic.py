@@ -700,6 +700,126 @@ def test_scrobble_submission_values_follow_protocol(lib, monkeypatch, submission
     assert bool(lib.get_listen_stats(0)) is should_count
 
 
+def test_scrobble_logs_submission_without_leaking_credentials(lib, caplog):
+    """An ignored scrobble must be visible: a client that only ever sends
+    now-playing pings otherwise looks identical to one that scrobbles."""
+    with caplog.at_level(logging.INFO, logger="worker.subsonic"):
+        response = client.get("/rest/scrobble.view", params={
+            **token_params(), "id": "vid-1", "submission": "false",
+        })
+
+    assert response.status_code == 200
+    assert "action=scrobble" in caplog.text
+    assert "id=vid-1 submission=false" in caplog.text
+    assert PASSWORD not in caplog.text
+
+
+def _ping(video_id, at_ms, monkeypatch):
+    monkeypatch.setattr(subsonic, "_now_ms", lambda: at_ms)
+    return client.get("/rest/scrobble.view", params={
+        **token_params(), "id": video_id, "submission": "false",
+    })
+
+
+@pytest.fixture(autouse=True)
+def _clear_playing_now():
+    subsonic._playing_now.clear()
+    yield
+    subsonic._playing_now.clear()
+
+
+def test_playing_now_pings_credit_the_previous_track(lib, monkeypatch):
+    """Amperfy never sends submission=true, so the listen has to be inferred
+    from the ping that starts the next track."""
+    async def meta(video_id):
+        return {"title": video_id, "artist": "Artist", "album": None,
+                "duration": 200, "artwork_url": None}
+
+    monkeypatch.setattr(subsonic, "_resolve_song_meta", meta)
+    start = 1_700_000_000_000
+    _ping("vid-a", start, monkeypatch)
+    assert lib.get_listen_stats(0) == []          # nothing yet: still playing
+
+    _ping("vid-b", start + 200_000, monkeypatch)  # vid-a played its full 200s
+
+    stats = lib.get_listen_stats(0)
+    assert [row["song_id"] for row in stats] == ["vid-a"]
+    assert lib.get_unsynced_listens()[0]["played_at_ms"] == start
+
+
+def test_skipped_track_is_not_credited(lib, monkeypatch):
+    async def meta(video_id):
+        return {"title": video_id, "artist": "Artist", "album": None,
+                "duration": 200, "artwork_url": None}
+
+    monkeypatch.setattr(subsonic, "_resolve_song_meta", meta)
+    start = 1_700_000_000_000
+    _ping("vid-a", start, monkeypatch)
+    _ping("vid-b", start + 20_000, monkeypatch)   # skipped after 20 seconds
+
+    assert lib.get_listen_stats(0) == []
+
+
+def test_long_track_counts_after_four_minutes_not_half(lib, monkeypatch):
+    """Half of a twenty-minute mix is ten minutes; the cap is four."""
+    async def meta(video_id):
+        return {"title": video_id, "artist": "Artist", "album": None,
+                "duration": 1200, "artwork_url": None}
+
+    monkeypatch.setattr(subsonic, "_resolve_song_meta", meta)
+    start = 1_700_000_000_000
+    _ping("vid-long", start, monkeypatch)
+    _ping("vid-next", start + 240_000, monkeypatch)
+
+    assert [row["song_id"] for row in lib.get_listen_stats(0)] == ["vid-long"]
+
+
+def test_repeated_ping_for_the_same_track_keeps_the_original_start(lib, monkeypatch):
+    async def meta(video_id):
+        return {"title": video_id, "artist": "Artist", "album": None,
+                "duration": 200, "artwork_url": None}
+
+    monkeypatch.setattr(subsonic, "_resolve_song_meta", meta)
+    start = 1_700_000_000_000
+    _ping("vid-a", start, monkeypatch)
+    _ping("vid-a", start + 5_000, monkeypatch)    # the client says it again
+    assert lib.get_listen_stats(0) == []
+
+    _ping("vid-b", start + 100_000, monkeypatch)  # 100s > half of 200s
+
+    assert [row["song_id"] for row in lib.get_listen_stats(0)] == ["vid-a"]
+    assert lib.get_unsynced_listens()[0]["played_at_ms"] == start
+
+
+def test_track_shorter_than_thirty_seconds_never_counts(lib, monkeypatch):
+    async def meta(video_id):
+        return {"title": video_id, "artist": "Artist", "album": None,
+                "duration": 20, "artwork_url": None}
+
+    monkeypatch.setattr(subsonic, "_resolve_song_meta", meta)
+    start = 1_700_000_000_000
+    _ping("vid-jingle", start, monkeypatch)
+    _ping("vid-next", start + 600_000, monkeypatch)
+
+    assert lib.get_listen_stats(0) == []
+
+
+def test_unknown_duration_counts_after_two_minutes(lib, monkeypatch):
+    async def meta(video_id):
+        return {"title": video_id, "artist": "Artist", "album": None,
+                "duration": None, "artwork_url": None}
+
+    monkeypatch.setattr(subsonic, "_resolve_song_meta", meta)
+    start = 1_700_000_000_000
+    _ping("vid-a", start, monkeypatch)
+    _ping("vid-b", start + 119_000, monkeypatch)
+    assert lib.get_listen_stats(0) == []
+
+    _ping("vid-c", start + 119_000 + 120_000, monkeypatch)
+
+    assert [row["song_id"] for row in lib.get_listen_stats(0)] == ["vid-b"]
+
+
 def test_scrobble_playing_now_does_not_count(lib):
     response = client.get("/rest/scrobble.view", params={
         **token_params(), "id": "vid-1", "submission": "false",
@@ -1501,3 +1621,79 @@ def test_album_list2_keeps_a_single_track_album_with_a_different_name(library_so
     names = [a.get("name") for a in listed.findall(".//s:album", _NS)]
     assert "Раскраски для взрослых" in names   # 1 song, different name — stays
     assert "Одинокая песня" not in names       # single with no album — substituted
+
+
+def test_real_submission_cancels_the_pending_ping(lib, monkeypatch):
+    """Amperfy occasionally does send submission=true. The play it reports must
+    not also be credited by the next playing-now ping."""
+    async def meta(video_id):
+        return {"title": video_id, "artist": "Artist", "album": None,
+                "duration": 200, "artwork_url": None}
+
+    monkeypatch.setattr(subsonic, "_resolve_song_meta", meta)
+    start = 1_700_000_000_000
+    _ping("vid-a", start, monkeypatch)
+    client.get(
+        "/rest/scrobble.view",
+        params={**token_params(), "id": "vid-a", "submission": "true"},
+    )
+    _ping("vid-b", start + 200_000, monkeypatch)  # vid-a is already accounted for
+
+    stats = lib.get_listen_stats(0)
+    assert [row["song_id"] for row in stats] == ["vid-a"]
+    assert stats[0]["listen_count"] == 1
+
+
+def test_a_track_re_pinged_while_playing_is_counted_once(lib, monkeypatch):
+    """Amperfy re-pings the playing track about once a minute. Past the
+    threshold every one of those pings used to start a fresh play."""
+    async def meta(video_id):
+        return {"title": video_id, "artist": "Artist", "album": None,
+                "duration": 231, "artwork_url": None}
+
+    monkeypatch.setattr(subsonic, "_resolve_song_meta", meta)
+    start = 1_700_000_000_000
+    for offset in (0, 48_000, 105_000, 155_000):   # the real 15:06 sequence
+        _ping("vid-a", start + offset, monkeypatch)
+    _ping("vid-b", start + 303_000, monkeypatch)
+
+    stats = lib.get_listen_stats(0)
+    assert [(row["song_id"], row["listen_count"]) for row in stats] == [("vid-a", 1)]
+
+
+def test_the_same_track_played_twice_over_counts_twice(lib, monkeypatch):
+    """A repeat ping past the track's own length is a second play, not the
+    client repeating itself."""
+    async def meta(video_id):
+        return {"title": video_id, "artist": "Artist", "album": None,
+                "duration": 185, "artwork_url": None}
+
+    monkeypatch.setattr(subsonic, "_resolve_song_meta", meta)
+    start = 1_700_000_000_000
+    _ping("vid-a", start, monkeypatch)
+    _ping("vid-a", start + 190_000, monkeypatch)   # first play is over
+    _ping("vid-b", start + 380_000, monkeypatch)
+
+    stats = lib.get_listen_stats(0)
+    assert [(row["song_id"], row["listen_count"]) for row in stats] == [("vid-a", 2)]
+
+
+def test_submission_after_the_ping_already_counted_it_adds_nothing(lib, monkeypatch):
+    """The real 15:53 sequence: two pings credit the play, then the client
+    submits the same track. Cancelling the pending entry came too late."""
+    async def meta(video_id):
+        return {"title": video_id, "artist": "Artist", "album": None,
+                "duration": 200, "artwork_url": None}
+
+    monkeypatch.setattr(subsonic, "_resolve_song_meta", meta)
+    start = 1_700_000_000_000
+    _ping("vid-a", start, monkeypatch)
+    _ping("vid-a", start + 120_000, monkeypatch)   # past the threshold: credited
+    client.get(
+        "/rest/scrobble.view",
+        params={**token_params(), "id": "vid-a", "submission": "true"},
+    )
+
+    stats = lib.get_listen_stats(0)
+    assert [row["song_id"] for row in stats] == ["vid-a"]
+    assert stats[0]["listen_count"] == 1
