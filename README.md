@@ -1,6 +1,13 @@
-# Mirasonic
+# YTM2API
 
-**A Subsonic server backed by YouTube Music.**
+**A Subsonic server backed by YouTube Music — with optional account login.**
+
+A fork of [Mirasonic](https://github.com/rilya888/Mirasonic) (GPL-3.0) that
+adds an optional YouTube Music login: with a cookies.txt from a Premium
+account, streams resolve at up to ~256 kbps AAC instead of the anonymous
+~129, and the account's liked songs and playlists can be synced into the
+library (see [docs/LOGIN.md](docs/LOGIN.md)). Without the cookie file it
+behaves exactly like upstream: fully anonymous.
 
 ![Mirasonic demo](docs/assets/mirasonic-demo.gif)
 
@@ -41,8 +48,8 @@ Mirasonic  (FastAPI, your machine)
 Requires Docker and a machine that can reach YouTube.
 
 ```sh
-git clone https://github.com/rilya888/Mirasonic.git
-cd Mirasonic
+git clone https://github.com/huchenz1/YTM2API.git
+cd YTM2API
 cp .env.example .env
 $EDITOR .env          # set SUBSONIC_USER, SUBSONIC_PASSWORD and REGION
 docker compose up -d --build
