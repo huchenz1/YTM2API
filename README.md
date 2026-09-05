@@ -26,12 +26,13 @@ Mirasonic  (FastAPI, your machine)
 ```
 
 - **Small Python services.** One playback worker by default, plus an opt-in
-  weekly recommendation agent. About 3,100 lines of code, 263 tests, one SQLite
+  weekly recommendation agent. About 3,400 lines of code, 287 tests, one SQLite
   file.
 - **Nothing is written to disk except the library.** The container runs
   `read_only: true`. Audio is never stored anywhere.
-- **Anonymous upstream.** Not a single cookie leaves this server toward
-  YouTube.
+- **Anonymous upstream by default.** Not a single cookie leaves this server
+  toward YouTube. An optional login ([docs/LOGIN.md](docs/LOGIN.md)) raises
+  the audio ceiling for a Premium account and syncs likes and playlists.
 - **Import your Spotify playlists** from an Exportify CSV, matched by duration,
   with a mapping table so a monthly re-import is cheap and stable.
 
@@ -96,6 +97,7 @@ WireGuard VPN or a reverse proxy terminating TLS works just as well.
 | `BIND_ADDRESS` / `HOST_PORT` | `127.0.0.1` / `8094` | Where compose publishes the port on the host. |
 | `LIBRARY_PATH` | `./data` | Host directory holding the library database. |
 | `MIRASONIC_DB` | `/data/mirasonic.db` | Database path inside the container. |
+| `YTM_COOKIES_FILE` | — | Optional cookies.txt inside the container; enables account login ([docs/LOGIN.md](docs/LOGIN.md)). |
 | `LISTENBRAINZ_USER` | — | ListenBrainz account used by the optional discovery agent. |
 | `LISTENBRAINZ_TOKEN` | — | ListenBrainz token used only by the optional discovery agent. |
 | `AGENT_WEEKDAY` | `0` | Weekly discovery day: Monday is `0`, Sunday is `6`. |
@@ -186,11 +188,36 @@ docker compose exec -T worker python spotify_import.py \
 
 Details, scoring and the re-import model: [docs/SPOTIFY-IMPORT.md](docs/SPOTIFY-IMPORT.md).
 
+## Logging in to YouTube Music (optional)
+
+With a cookies.txt exported from a logged-in music.youtube.com session, the
+server resolves streams with the account's privileges — up to ~256 kbps AAC
+on a Premium account instead of the anonymous ~129, plus age-restricted
+tracks — and can pull the account's liked songs and playlists into the
+library:
+
+```sh
+mv cookies.txt data/cookies.txt
+echo 'YTM_COOKIES_FILE=/data/cookies.txt' >> .env
+docker compose up -d --force-recreate worker
+
+docker compose exec worker python ytm_sync.py --dry-run all
+docker compose exec worker python ytm_sync.py all
+```
+
+The sync is one account API call per playlist (no search burst, no captcha
+risk) and strictly additive: un-liking on YouTube never unstars locally, and
+starring in a client never writes back to the account. The full trade-off —
+account-flagging risk, cookie expiry, re-exporting — is documented honestly
+in [docs/LOGIN.md](docs/LOGIN.md). Leaving the variable unset keeps the
+server exactly as anonymous as it was.
+
 ## What it does not do
 
-- **Age-restricted tracks do not play.** They never resolve anonymously; the
-  server returns 404. The only workaround would be account cookies, which this
-  project does not do.
+- **Age-restricted tracks do not play anonymously.** They never resolve
+  without an account; the server returns 404. An optional login
+  ([docs/LOGIN.md](docs/LOGIN.md)) lifts this — at the price of tying the
+  traffic to a real account.
 - **Artists and albums are yours, not YouTube's.** Those tabs are built from
   the tracks in your library, so you will not find a band's full discography
   there until its tracks are in a playlist or starred.
@@ -204,7 +231,7 @@ Details, scoring and the re-import model: [docs/SPOTIFY-IMPORT.md](docs/SPOTIFY-
 
 ```sh
 pip install -r requirements.txt
-python -m pytest -q            # 263 tests, no network
+python -m pytest -q            # 287 tests, no network
 python -m pytest -m live       # hits YouTube for real
 ```
 

@@ -1,9 +1,12 @@
-"""Mirasonic worker: anonymous YouTube Music search + stream proxy.
+"""Mirasonic worker: YouTube Music search + stream proxy.
 
 GET /search?q=...&limit=..  -> {"tracks": [...]}
 GET /stream/{video_id}      -> proxied audio bytes (Range-aware)
 
-No auth, no DB, no disk writes. Everything cached is a plain in-memory dict.
+Anonymous by default (no cookies, no account). Setting YTM_COOKIES_FILE
+(ytm_auth.py, docs/LOGIN.md) resolves streams with the account's privileges —
+up to ~256 kbps AAC for a Premium account, plus age-gated tracks. Everything
+cached is a plain in-memory dict.
 """
 import asyncio
 import logging
@@ -18,6 +21,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
+
+import ytm_auth
 
 logging.basicConfig(level=logging.INFO)
 # httpx/httpcore log every request URL at INFO level by default, which would
@@ -389,8 +394,24 @@ def _extract_expire(url: str) -> Optional[int]:
         return None
 
 
+def _ydl_opts() -> dict:
+    """The base options plus the login cookies, when one is configured.
+
+    A fresh dict per resolve rather than a shared one: whether to send
+    cookies is decided per call, so a re-export (or a removal) of the file
+    takes effect on the next track without a restart. With a Premium cookie
+    present, `bestaudio[ext=m4a]` selects the highest available AAC itag —
+    up to 141 (~256 kbps) where the anonymous resolve stops at 140 (~129).
+    """
+    opts = dict(YDL_OPTS)
+    cookies = ytm_auth.active_cookie_copy()
+    if cookies is not None:
+        opts["cookiefile"] = cookies
+    return opts
+
+
 def _resolve_stream_sync(video_id: str) -> str:
-    with YoutubeDL(YDL_OPTS) as ydl:
+    with YoutubeDL(_ydl_opts()) as ydl:
         info = ydl.extract_info(
             f"https://music.youtube.com/watch?v={video_id}", download=False
         )
@@ -581,19 +602,35 @@ async def _download(url: str) -> bytes:
     raise UpstreamError(f"upstream unreachable: {last!r}")
 
 
-async def _remux_to_adts(data: bytes) -> bytes:
+async def _ffmpeg_adts(data: bytes, codec_args: list[str]) -> tuple[bytes, bytes]:
     proc = await asyncio.create_subprocess_exec(
         "ffmpeg", "-hide_banner", "-loglevel", "error",
-        "-i", "pipe:0", "-vn", "-c:a", "copy", "-f", "adts", "pipe:1",
+        "-i", "pipe:0", "-vn", *codec_args, "-f", "adts", "pipe:1",
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
     out, err = await proc.communicate(data)
-    if proc.returncode != 0 or not out:
-        raise UpstreamError(
-            f"ffmpeg rc={proc.returncode}: {err[:200].decode('utf-8', 'replace')}")
-    return out
+    return out, err
+
+
+async def _remux_to_adts(data: bytes) -> bytes:
+    """AAC in the fragmented mp4 container is copied bitstream-for-bitstream.
+    The fallback re-encode covers the one case where the copy cannot work:
+    `bestaudio[ext=m4a]/bestaudio` found no AAC at all and handed back another
+    codec (Opus, typically) — ADTS cannot carry it, and without the fallback
+    that track would 502 forever. One extra pass, ~1 s for 5 MB, only on the
+    tracks that need it."""
+    out, err = await _ffmpeg_adts(data, ["-c:a", "copy"])
+    if out:
+        return out
+    out, _err = await _ffmpeg_adts(data, ["-c:a", "aac", "-b:a", "256k"])
+    if out:
+        logger.info("adts: re-encoded non-AAC source (%s)",
+                    _err[:120].decode("utf-8", "replace").strip())
+        return out
+    raise UpstreamError(
+        f"ffmpeg rc=1: {err[:200].decode('utf-8', 'replace')}")
 
 
 async def get_adts(video_id: str) -> bytes:

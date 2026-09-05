@@ -15,6 +15,9 @@ services:
       REGION: ${REGION:?set REGION in .env, e.g. US}
       MIRASONIC_DB: /data/mirasonic.db
       HOME: /tmp
+      # Optional YouTube Music login (docs/LOGIN.md): a cookies.txt path inside
+      # the container. Empty means fully anonymous.
+      YTM_COOKIES_FILE: ${YTM_COOKIES_FILE:-}
       # Docker captures a pipe, not a tty: without this the logs arrive in 8KB
       # bursts, which makes them useless for watching a live session.
       PYTHONUNBUFFERED: "1"

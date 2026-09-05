@@ -58,6 +58,16 @@ CREATE TABLE IF NOT EXISTS spotify_map (
   mapped_at   TEXT NOT NULL
 );
 
+-- YTM playlistId → local playlist, so a re-sync of the same account playlist
+-- lands in the playlist it created last time instead of duplicating it by
+-- name (ytm_sync.py). The local playlist is still an ordinary one: the client
+-- keeps editing it, the sync only ever appends.
+CREATE TABLE IF NOT EXISTS ytm_playlists (
+  ytm_id      TEXT PRIMARY KEY,
+  playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+  synced_at   TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS listening_events (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   song_id        TEXT NOT NULL REFERENCES songs(id),
@@ -300,6 +310,24 @@ class Library:
                 "ON CONFLICT(spotify_uri) DO UPDATE SET song_id = excluded.song_id, "
                 "mapped_at = excluded.mapped_at",
                 [(uri, song_id, _now_iso()) for uri, song_id in pairs],
+            )
+            self._conn.commit()
+
+    # -- YTM playlist mappings (ytm_sync.py) ------------------------------
+
+    def get_ytm_playlist_map(self) -> dict[str, int]:
+        return {r["ytm_id"]: r["playlist_id"] for r in
+                self._conn.execute("SELECT ytm_id, playlist_id FROM ytm_playlists")}
+
+    def put_ytm_playlist_map(self, pairs: list[tuple[str, int]]) -> None:
+        """`pairs` is [(ytm_playlistId, local_playlist_id), …]. The local
+        playlist must already exist (FOREIGN KEY)."""
+        with self._lock:
+            self._conn.executemany(
+                "INSERT INTO ytm_playlists (ytm_id, playlist_id, synced_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(ytm_id) DO UPDATE SET playlist_id = excluded.playlist_id, "
+                "synced_at = excluded.synced_at",
+                [(ytm_id, playlist_id, _now_iso()) for ytm_id, playlist_id in pairs],
             )
             self._conn.commit()
 

@@ -2,6 +2,25 @@
 
 All notable changes to Mirasonic are documented here.
 
+## [Unreleased] — YTM login fork
+
+### Added
+
+- Optional YouTube Music login via `YTM_COOKIES_FILE` (`ytm_auth.py`,
+  docs/LOGIN.md): stream resolution runs with the account's privileges —
+  up to ~256 kbps AAC on a Premium account instead of the anonymous ~129,
+  plus age-restricted tracks. The cookie file is handed to yt-dlp as a
+  fresh writable copy per re-export; the original is never opened for
+  writing. Unset stays fully anonymous, byte for byte the upstream behavior.
+- `ytm_sync.py`: pulls the account's liked songs (as starred tracks) and
+  playlists (as local playlists) into the library through ytmusicapi — one
+  account API call per playlist, no search, no yt-dlp. Strictly additive and
+  one-way; the `ytm_playlists` table keeps re-syncs on the same local
+  playlist across renames.
+- ADTS remux now falls back to a one-pass AAC re-encode when a resolved
+  stream is not AAC at all (Opus fallback of `bestaudio`), instead of 502ing
+  the track.
+
 ## [0.2.0] - 2026-08-31
 
 ### Added

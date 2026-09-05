@@ -5,3 +5,7 @@ httpx==0.27.2
 # regular basis, and the normal fix is rebuilding the image against a fresh
 # version. Pinning it here would guarantee breakage, not reproducibility.
 yt-dlp
+# Same reasoning as yt-dlp: ytmusicapi speaks InnerTube from the inside, and
+# Google changes that surface without notice. Used only by ytm_sync.py — the
+# playback worker never imports it.
+ytmusicapi
