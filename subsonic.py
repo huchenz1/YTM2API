@@ -202,7 +202,7 @@ def _xml_response(root: ET.Element, status_code: int = 200) -> Response:
     # browser pages, and an app-side HTTP client parses the body directly.
     if _RESPONSE_FORMAT.get() == "json":
         body = json.dumps(
-            {"subsonic-response": _json_obj(root)}, ensure_ascii=False
+            {"subsonic-response": _json_obj(root, at_root=True)}, ensure_ascii=False
         ).encode("utf-8")
         return Response(content=body, media_type="application/json",
                         status_code=status_code)
@@ -228,13 +228,20 @@ _COLLECTION_TAGS = frozenset({
 })
 
 
-def _json_obj(elem: ET.Element) -> dict:
+def _json_obj(elem: ET.Element, at_root: bool = False) -> dict:
+    """Subsonic's JSON convention. Direct children of the response root
+    (searchResult3, playlists, error, getSong's song, …) are singleton
+    objects; deeper down, collection tags serialize as arrays even when a
+    single element carries them, everything else as single objects."""
     obj = {k: v for k, v in elem.attrib.items() if k != "xmlns"}
     grouped: dict[str, list] = {}
     for child in elem:
         grouped.setdefault(child.tag, []).append(_json_obj(child))
     for tag, children in grouped.items():
-        obj[tag] = children if tag in _COLLECTION_TAGS else children[0]
+        if not at_root and (tag in _COLLECTION_TAGS or len(children) > 1):
+            obj[tag] = children
+        else:
+            obj[tag] = children[0]
     return obj
 
 

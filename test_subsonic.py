@@ -128,6 +128,16 @@ def test_json_ping_has_the_documented_shape():
     assert "xmlns" not in root
 
 
+def test_json_getsong_song_is_a_singleton_object(lib):
+    """getSong answers one track; the official convention keeps a root-level
+    singleton an object even though the same tag is an array elsewhere."""
+    lib.star("vidS1", "T", "A", "Al", 100, None)
+    resp = client.get("/rest/getSong.view", params={**token_params(), "f": "json", "id": "vidS1"})
+    root = resp.json()["subsonic-response"]
+    assert isinstance(root["song"], dict)
+    assert root["song"]["id"] == "vidS1"
+
+
 def test_json_error_is_a_singleton_object_not_an_array():
     resp = client.get("/rest/ping", params={**token_params(password="nope"), "f": "json"})
     root = resp.json()["subsonic-response"]
