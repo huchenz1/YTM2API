@@ -40,13 +40,20 @@ untouched. This layer lives under the `/rest` prefix.
 None of this is guesswork; it is behaviour baked into the client. Violating any
 of it breaks the connection silently.
 
-**Path.** `{base URL}/rest/{action}.view` — the `.view` suffix is mandatory,
-the client always appends it (`createBasicApiUrlComponent`). The method is
+**Path.** `{base URL}/rest/{action}.view` — the `.view` suffix is optional
+(since Subsonic API 1.8), and both `/rest/{action}` and `/rest/{action}.view`
+route to the same handler. Amperfy always appends the suffix
+(`createBasicApiUrlComponent`); several other clients never do. The method is
 always GET.
 
-**Response format: XML only.** Amperfy does not send the `f` parameter and
-parses with `XMLParser`. Implementing JSON is unnecessary and actively harmful:
-it will not be parsed.
+**Response format.** XML by default — Amperfy does not send `f` and parses
+with `XMLParser`. `f=json` (and `jsonp`, answered as plain JSON) switches to
+the official Subsonic JSON convention: attributes become fields, repeatable
+children (`song`, `entry`, `album`, `artist`, `index`, `playlist`, …) become
+arrays, singletons (`error`, …) become objects. This fork serves both because
+clients that send `f=json` parse nothing else — an XML body reads as garbage
+and the request "fails" even at HTTP 200 (observed live with ListenNow,
+2026-09-06).
 
 **Status code: always `200`.** The client wraps requests in
 `AF.request(...).validate()`, which treats anything outside `200..299` as an

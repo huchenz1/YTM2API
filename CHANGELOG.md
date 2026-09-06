@@ -2,6 +2,17 @@
 
 All notable changes to Mirasonic are documented here.
 
+## [Unreleased] — client compatibility
+
+### Added
+
+- Bare `/rest/{action}` paths (no `.view` suffix) are routed identically —
+  the suffix has been optional since Subsonic API 1.8, and clients like
+  ListenNow send only the bare form and failed the handshake with 404.
+- `f=json` (and `jsonp`, as plain JSON) now returns the official Subsonic
+  JSON convention: attributes as fields, collection children as arrays,
+  singletons as objects. XML remains the default and is unchanged.
+
 ## [Unreleased] — YTM login fork
 
 ### Added

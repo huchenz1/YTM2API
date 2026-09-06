@@ -11,8 +11,10 @@ No knowledge of SQL lives here either — that's library.py; this module only
 resolves metadata and calls into it.
 """
 import asyncio
+import contextvars
 import hashlib
 import hmac
+import json
 import logging
 import os
 import random
@@ -191,11 +193,49 @@ def _root(status: str) -> ET.Element:
 
 
 def _xml_response(root: ET.Element, status_code: int = 200) -> Response:
+    # The Subsonic spec lets the client pick the wire format with `f`; the
+    # default (and what Amperfy always gets, since it never sends `f`) stays
+    # XML. `f=json` switches to the official JSON convention, which modern
+    # clients (ListenNow among them) parse exclusively — an XML body there
+    # reads as garbage and the request "fails" even with HTTP 200. jsonp is
+    # answered as plain JSON: the callback wrapper only ever mattered in
+    # browser pages, and an app-side HTTP client parses the body directly.
+    if _RESPONSE_FORMAT.get() == "json":
+        body = json.dumps(
+            {"subsonic-response": _json_obj(root)}, ensure_ascii=False
+        ).encode("utf-8")
+        return Response(content=body, media_type="application/json",
+                        status_code=status_code)
     # encoding="utf-8" makes ElementTree omit its own <?xml ...?> line (it
     # only emits one for encodings other than utf-8/us-ascii/unicode), so
     # prepending ours here does not produce a duplicate declaration.
     body = b'<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding="utf-8")
     return Response(content=body, media_type="text/xml", status_code=status_code)
+
+
+# Per-request wire format. A ContextVar, not a module string: two overlapping
+# requests (one json, one xml) must not serialize into each other's format
+# across the awaits inside a handler.
+_RESPONSE_FORMAT: "contextvars.ContextVar[str]" = contextvars.ContextVar(
+    "subsonic_response_format", default="xml")
+
+# Tags that repeat inside their parent serialize as JSON arrays; every other
+# child is a singleton object — exactly the official convention ("error" is an
+# object, "song" is always an array, even when there is exactly one).
+_COLLECTION_TAGS = frozenset({
+    "song", "entry", "album", "artist", "index", "playlist", "musicFolder",
+    "genre", "internetRadioStation", "podcast", "newestPodcast", "similarSong2",
+})
+
+
+def _json_obj(elem: ET.Element) -> dict:
+    obj = {k: v for k, v in elem.attrib.items() if k != "xmlns"}
+    grouped: dict[str, list] = {}
+    for child in elem:
+        grouped.setdefault(child.tag, []).append(_json_obj(child))
+    for tag, children in grouped.items():
+        obj[tag] = children if tag in _COLLECTION_TAGS else children[0]
+    return obj
 
 
 def _ok_response(build=None) -> Response:
@@ -1030,19 +1070,30 @@ _LOGGED_VALUES = {
 }
 
 
-@router.get("/{action}.view")
-async def rest_dispatch(action: str, request: Request) -> Response:
+# One route for both wire forms: "/rest/ping" and "/rest/ping.view" are the
+# same action — the suffix is optional since Subsonic API 1.8, and clients
+# like ListenNow send only the bare form (a .view-only server fails their
+# handshake with 404; observed live 2026-09-06). Deliberately a single catch-
+# all route with the suffix stripped here rather than two registered routes:
+# Starlette tries routes first-registered-first-matched, so a second route
+# would be shadowed and "/rest/ping.view" would dispatch as "ping.view".
+@router.get("/{action_with_suffix}")
+async def rest_dispatch(action_with_suffix: str, request: Request) -> Response:
+    action = (action_with_suffix[:-len(".view")]
+              if action_with_suffix.endswith(".view") else action_with_suffix)
     params = request.query_params
+    _RESPONSE_FORMAT.set("json" if params.get("f") in ("json", "jsonp") else "xml")
     # Never log t/s/p — that would leak credentials the same way an unfiltered
     # httpx logger would leak signed media URLs (docs/SUBSONIC.md §3, main.py's own
     # httpx/httpcore log suppression follows the same rule).
-    # These values are not secrets either, and they are the only way to see
-    # what the client is actually asking for: both the ceiling on search
+    # These values are not secrets either, and they are the only way to
+    # see what the client is actually asking for: both the ceiling on search
     # results and the traversal order of the Albums tab are set by the client,
     # not by the server.
     extra = "".join(f" {name}={params.get(name)}"
                     for name in _LOGGED_VALUES.get(action, ()))
-    logger.info("rest action=%s params=%s%s", action, sorted(params.keys()), extra)
+    logger.info("rest action=%s f=%s params=%s%s", action,
+                params.get("f", "xml"), sorted(params.keys()), extra)
 
     if not _authenticate(params):
         return _error_response(40, "Wrong username or password")

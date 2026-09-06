@@ -99,7 +99,8 @@ def test_unknown_action_is_also_http_200():
 
 
 # ---------------------------------------------------------------------------
-# .view suffix is mandatory
+# path forms and wire formats — the Subsonic spec makes the .view suffix
+# optional since 1.8, and clients decide the format with `f`
 # ---------------------------------------------------------------------------
 
 def test_path_with_view_suffix_works():
@@ -108,9 +109,61 @@ def test_path_with_view_suffix_works():
     assert 'status="ok"' in resp.text
 
 
-def test_path_without_view_suffix_is_not_routed():
+def test_path_without_view_suffix_is_also_routed():
+    """The spec-optional bare form is what several modern clients send
+    exclusively — a .view-only server fails their handshake with 404
+    (observed live with ListenNow, 2026-09-06)."""
     resp = client.get("/rest/ping", params=token_params())
-    assert resp.status_code == 404
+    assert resp.status_code == 200
+    assert 'status="ok"' in resp.text
+
+
+def test_json_ping_has_the_documented_shape():
+    resp = client.get("/rest/ping", params={**token_params(), "f": "json"})
+    assert resp.headers["content-type"].startswith("application/json")
+    root = resp.json()["subsonic-response"]
+    assert root["status"] == "ok"
+    assert root["version"] == "1.16.1"
+    assert root["type"] == "mirasonic"
+    assert "xmlns" not in root
+
+
+def test_json_error_is_a_singleton_object_not_an_array():
+    resp = client.get("/rest/ping", params={**token_params(password="nope"), "f": "json"})
+    root = resp.json()["subsonic-response"]
+    assert root["status"] == "failed"
+    assert isinstance(root["error"], dict)
+    assert root["error"]["code"] == "40"
+
+
+def test_json_collections_are_arrays_even_with_one_element(lib):
+    lib.star("vidJ1", "Json Title", "Json Artist", "Json Album", 120, None)
+    resp = client.get("/rest/getStarred2.view",
+                      params={**token_params(), "f": "json"})
+    starred = resp.json()["subsonic-response"]["starred2"]
+    assert isinstance(starred["song"], list)
+    song = starred["song"][0]
+    assert song["id"] == "vidJ1"
+    assert song["title"] == "Json Title"
+    assert song["artistId"] == subsonic._artist_id("Json Artist")
+    assert song["albumId"] == subsonic._album_id("Json Artist", "Json Album")
+    assert song["duration"] == "120"
+    assert song["contentType"] == "audio/aac"
+    assert song["size"] == str(subsonic._estimate_size(120))
+    assert isinstance(song["starred"], str)  # present means starred
+
+
+def test_xml_stays_the_default_when_f_is_absent(lib):
+    lib.star("vidX1", "T", "A", "Al", 100, None)
+    resp = client.get("/rest/getStarred2.view", params=token_params())
+    assert resp.headers["content-type"].startswith("text/xml")
+    assert 'id="vidX1"' in resp.text
+
+
+def test_jsonp_is_answered_as_json():
+    resp = client.get("/rest/ping", params={**token_params(), "f": "jsonp"})
+    assert resp.headers["content-type"].startswith("application/json")
+    assert resp.json()["subsonic-response"]["status"] == "ok"
 
 
 # ---------------------------------------------------------------------------
