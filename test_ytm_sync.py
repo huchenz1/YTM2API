@@ -127,6 +127,28 @@ def test_sync_likes_dry_run_writes_nothing(tmp_path):
     assert lib.get_song("v1") is None
 
 
+def test_whoami_reports_signed_out_session(tmp_path, monkeypatch, capsys):
+    class NoSession:
+        def get_account_info(self):
+            raise KeyError("header")
+
+    monkeypatch.setenv("YTM_COOKIES_FILE", parseable_cookies(tmp_path))
+    monkeypatch.setattr(ytm_sync, "build_client", lambda path: NoSession())
+    assert asyncio.run(ytm_sync._main(["whoami"])) == 1
+    assert "no active session" in capsys.readouterr().out
+
+
+def test_whoami_reports_the_account_name(tmp_path, monkeypatch, capsys):
+    class SignedIn:
+        def get_account_info(self):
+            return {"accountName": [{"text": "Prem"}, {"text": "ium User"}]}
+
+    monkeypatch.setenv("YTM_COOKIES_FILE", parseable_cookies(tmp_path))
+    monkeypatch.setattr(ytm_sync, "build_client", lambda path: SignedIn())
+    assert asyncio.run(ytm_sync._main(["whoami"])) == 0
+    assert "logged in as: Premium User" in capsys.readouterr().out
+
+
 # -- playlists -------------------------------------------------------------
 
 def two_playlist_fixture():

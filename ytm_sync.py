@@ -181,6 +181,24 @@ async def sync_playlists(lib: library.Library, ytm, dry_run: bool = False) -> di
     return {"kind": "playlists", "playlists": results}
 
 
+async def whoami(ytm) -> int:
+    """Prints which account the cookies are signed in as — the operational
+    check for 'is my export still alive'. A session Google has signed out
+    (rotation, a new export from the wrong profile, cookie staleness) gets a
+    menu without any active account, which ytmusicapi surfaces as a
+    navigation error; that is a diagnosis, not a crash."""
+    try:
+        info = await asyncio.to_thread(ytm.get_account_info)
+    except Exception as exc:
+        print(f"no active session — the cookies are signed out or invalid "
+              f"({type(exc).__name__}). Re-export and re-upload (docs/LOGIN.md).")
+        return 1
+    runs = info.get("accountName") or []
+    name = "".join(r.get("text", "") for r in runs if isinstance(r, dict))
+    print(f"logged in as: {name or info}")
+    return 0
+
+
 def print_likes_report(report: dict) -> None:
     print(f"\nlikes: {report['total']} tracks in the account")
     print(f"  with videoId:   {report['resolved']}")
@@ -200,7 +218,7 @@ def print_playlists_report(report: dict) -> None:
 async def _main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         description="Sync the logged-in YouTube Music account (likes, playlists)")
-    parser.add_argument("what", choices=("likes", "playlists", "all"))
+    parser.add_argument("what", choices=("likes", "playlists", "all", "whoami"))
     parser.add_argument("--dry-run", action="store_true",
                         help="report only, write nothing")
     args = parser.parse_args(argv)
@@ -214,9 +232,11 @@ async def _main(argv: list[str]) -> int:
         parser.error(f"{source} holds no parseable cookies — re-export it "
                      "(docs/LOGIN.md)")
 
-    lib = library.Library()
+    lib = library.Library() if args.what != "whoami" else None
     ytm = build_client(source)
 
+    if args.what == "whoami":
+        return await whoami(ytm)
     if args.what in ("likes", "all"):
         report = await sync_likes(lib, ytm, args.dry_run)
         print_likes_report(report)
