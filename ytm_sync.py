@@ -44,24 +44,37 @@ REGION = os.environ.get("REGION", "US")
 AUTO_PLAYLIST_PREFIXES = ("LM",)
 
 
-def build_client(cookie_path: str):
-    """A ytmusicapi client speaking with the account's cookies.
+def _browser_headers(cookies: list[dict]) -> dict:
+    """Browser-shaped auth headers ytmusicapi accepts.
 
-    ytmusicapi takes browser auth as a headers dict and builds its own
-    SAPISIDHASH Authorization out of the SAPISID cookie on every request —
-    which is why parse_netscape's name/value pairs are enough, and why a
-    missing SAPISID family is warned about in ytm_auth. Imported here, not
-    at module level: the worker shares this image but never needs it.
+    ytmusicapi classifies the auth by the presence of an Authorization header
+    containing "SAPISIDHASH" — without it a Cookie-only dict is read as an
+    OAuth token and refused. The value here is a marker only: for browser
+    auth ytmusicapi regenerates the real SAPISIDHASH on every request from
+    the __Secure-3PAPISID cookie and the origin header, both of which must be
+    present.
     """
-    from ytmusicapi import YTMusic
-
-    cookies = ytm_auth.parse_netscape(cookie_path)
-    headers = {
+    return {
         "Cookie": "; ".join(f"{c['name']}={c['value']}" for c in cookies),
         "User-Agent": main.USER_AGENT,
         "Accept-Language": "en-US,en;q=0.9",
+        "X-Goog-AuthUser": "0",
+        "X-Origin": "https://music.youtube.com",
+        "Origin": "https://music.youtube.com",
+        "Authorization": "SAPISIDHASH",
     }
-    return YTMusic(auth=headers, location=REGION)
+
+
+def build_client(cookie_path: str):
+    """A ytmusicapi client speaking with the account's cookies.
+
+    Imported here, not at module level: the worker shares this image but
+    never needs it.
+    """
+    from ytmusicapi import YTMusic
+
+    return YTMusic(auth=_browser_headers(ytm_auth.parse_netscape(cookie_path)),
+                   location=REGION)
 
 
 def track_row(track: dict) -> Optional[tuple]:

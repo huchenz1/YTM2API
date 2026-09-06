@@ -52,6 +52,20 @@ class FakeYTM:
 
 # -- track_row -------------------------------------------------------------
 
+def test_browser_headers_satisfy_ytmusicapi_browser_detection(tmp_path, monkeypatch):
+    """ytmusicapi classifies auth as browser by an Authorization header
+    containing SAPISIDHASH, then regenerates the real value per request from
+    the __Secure-3PAPISID cookie and the origin. A Cookie-only dict reads as
+    an OAuth token and is refused (observed live with ytmusicapi 1.12)."""
+    import ytm_auth
+
+    cookies = ytm_auth.parse_netscape(parseable_cookies(tmp_path))
+    headers = ytm_sync._browser_headers(cookies)
+    assert "SAPISIDHASH" in headers["Authorization"]
+    assert "__Secure-3PAPISID=" in headers["Cookie"]
+    assert headers["X-Origin"] == "https://music.youtube.com"
+
+
 def test_track_row_maps_the_full_shape():
     row = ytm_sync.track_row(track("v1", title="Song", artist="Artist", album="Album"))
     assert row == ("v1", "Song", "Artist", "Album", 200, "img/v1-big")
