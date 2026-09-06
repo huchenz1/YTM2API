@@ -2,6 +2,25 @@
 
 All notable changes to Mirasonic are documented here.
 
+## [Unreleased] — premium quality
+
+### Fixed
+
+- A logged-in (Premium) session resolves nothing without a JavaScript
+  runtime: YouTube's n-challenge is unsolvable, every format is skipped, and
+  the resolve dies on "The page needs to be reloaded". The image now ships
+  deno plus the yt-dlp-ejs solver scripts (remote fetch from the official
+  GitHub allowed as a fallback). With Premium cookies the audio is now the
+  ~258 kbps itag-141 stream instead of the anonymous ~130 (measured
+  2026-09-07).
+- `<song bitRate>`/`size` now report the bitrate the last resolve actually
+  selected instead of the constant 129.
+
+### Added
+
+- `ytm_sync.py whoami`: prints which account the cookie file is signed in
+  as, so a dead export is a one-command diagnosis.
+
 ## [Unreleased] — client compatibility
 
 ### Added

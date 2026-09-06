@@ -525,7 +525,7 @@ def test_prefetch_then_stream_does_not_resolve_twice(monkeypatch):
 
     def fake_resolve_sync(video_id):
         resolves.append(video_id)
-        return "https://example.test/media?expire=99999999999"
+        return "https://example.test/media?expire=99999999999", 129
 
     monkeypatch.setattr(main, "_resolve_stream_sync", fake_resolve_sync)
     client = TestClient(main.app)

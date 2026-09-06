@@ -110,8 +110,7 @@ The sync is deliberately **additive and one-way**:
 - No uploads: uploaded music is not exposed, even though cookies could see it.
 - No write-back, no two-way sync: the server stays read-only toward the
   account.
-- No per-track bitrate reporting: the Subsonic layer keeps advertising the
-  anonymous ~129 kbps figure; a client that displays it may understate a
-  track that actually arrived at 256. Estimating real per-track bitrate
-  would need a resolve per track, which is exactly the request pattern this
-  server refuses to make.
+- Bitrate reporting is honest only after playback: a track's `<song bitRate>`
+  says whatever its last resolve actually selected (≈258 with this setup),
+  and before the first resolve it falls back to the anonymous ~129 floor —
+  an underestimate, never an overstatement.

@@ -415,7 +415,10 @@ def _ydl_opts() -> dict:
     return opts
 
 
-def _resolve_stream_sync(video_id: str) -> str:
+def _resolve_stream_sync(video_id: str) -> tuple[str, Optional[int]]:
+    """The signed URL plus the selected format's average bitrate in kbps
+    (None when the extractor does not report one — the Subsonic layer then
+    keeps its anonymous-128k estimate)."""
     with YoutubeDL(_ydl_opts()) as ydl:
         info = ydl.extract_info(
             f"https://music.youtube.com/watch?v={video_id}", download=False
@@ -423,7 +426,8 @@ def _resolve_stream_sync(video_id: str) -> str:
     url = info.get("url")
     if not url:
         raise DownloadError(f"no direct url resolved for {video_id}")
-    return url
+    abr = info.get("abr")
+    return url, int(abr) if abr else None
 
 
 async def get_stream_url(video_id: str) -> str:
@@ -431,10 +435,17 @@ async def get_stream_url(video_id: str) -> str:
     now = time.time()
     if cached and cached["expire"] - STREAM_EXPIRE_MARGIN_SECONDS > now:
         return cached["url"]
-    url = await asyncio.to_thread(_resolve_stream_sync, video_id)
+    url, abr = await asyncio.to_thread(_resolve_stream_sync, video_id)
     expire = _extract_expire(url) or (now + 3600)
-    _stream_cache[video_id] = {"url": url, "expire": expire}
+    _stream_cache[video_id] = {"url": url, "expire": expire, "abr": abr}
     return url
+
+
+def get_bitrate(video_id: str) -> Optional[int]:
+    """The resolved stream's bitrate in kbps, once this process has resolved
+    the track at least once; None before that."""
+    cached = _stream_cache.get(video_id)
+    return cached.get("abr") if cached else None
 
 
 async def get_song_details(video_id: str) -> dict:

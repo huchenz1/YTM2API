@@ -271,6 +271,13 @@ def _add_song_element(parent: ET.Element, tag: str, video_id: str, meta: dict) -
     artist = meta.get("artist") or ""
     album = meta.get("album") or title
     duration = meta.get("duration") or 0
+    # The bitrate is whatever the last resolve of this track actually selected
+    # (256 with a premium login, 129 anonymous). Before the first resolve it
+    # is unknown, and the anonymous floor is what gets reported — an
+    # underestimate, never an overstatement of quality.
+    bitrate = main.get_bitrate(video_id)
+    size = (int(duration * bitrate * 1000 / 8)
+            if bitrate and duration else _estimate_size(duration))
     attrib = {
         "id": video_id,
         "title": title,
@@ -279,11 +286,11 @@ def _add_song_element(parent: ET.Element, tag: str, video_id: str, meta: dict) -
         "album": album,
         "albumId": _album_id(artist, album),
         "duration": str(duration),
-        "size": str(_estimate_size(duration)),
+        "size": str(size),
         "coverArt": video_id,
         "contentType": main.ADTS_CONTENT_TYPE,
         "suffix": "aac",
-        "bitRate": str(BIT_RATE),
+        "bitRate": str(bitrate or BIT_RATE),
         "isDir": "false",
         "type": "music",
         "created": _iso_created(),

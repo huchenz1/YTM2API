@@ -191,6 +191,24 @@ def test_library_path_can_be_configured_with_mirasonic_env(monkeypatch, tmp_path
 # <song> element construction — escaping and duration="0" fallback
 # ---------------------------------------------------------------------------
 
+def test_song_element_reports_resolved_bitrate_when_known(monkeypatch):
+    """After a resolve, the real selected bitrate (258 with a premium login)
+    is reported instead of the anonymous floor — and the size estimate is
+    computed from it, not from the 129 kbps constant."""
+    import xml.etree.ElementTree as ET
+
+    monkeypatch.setitem(main._stream_cache, "vidBR", {
+        "url": "https://example.test/media", "expire": 9e12, "abr": 258,
+    })
+    root = ET.Element("root")
+    subsonic._add_song_element(root, "song", "vidBR", {
+        "title": "T", "artist": "A", "album": "Al", "duration": 243,
+    })
+    song = root.find("song")
+    assert song.get("bitRate") == "258"
+    assert song.get("size") == str(243 * 258 * 1000 // 8)
+
+
 def test_song_element_escapes_ampersand_and_quotes():
     import xml.etree.ElementTree as ET
 
