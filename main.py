@@ -80,6 +80,11 @@ YDL_OPTS = {
     "no_warnings": True,
     "skip_download": True,
     "format": "bestaudio[ext=m4a]/bestaudio",
+    # Allow fetching the EJS solver scripts from the official yt-dlp-ejs
+    # GitHub as a fallback when the bundled yt-dlp-ejs package trails the
+    # yt-dlp version. Without a working solver the n-challenge is unsolvable,
+    # and a logged-in (premium) session resolves nothing at all.
+    "remote_components": {"ejs:github"},
 }
 UNAVAILABLE_MARKERS = (
     "unavailable",

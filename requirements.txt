@@ -9,3 +9,6 @@ yt-dlp
 # Google changes that surface without notice. Used only by ytm_sync.py — the
 # playback worker never imports it.
 ytmusicapi
+# The JS challenge solver scripts for yt-dlp's n-challenge (EJS). Has to move
+# in lockstep with yt-dlp, hence unpinned for the same reason.
+yt-dlp-ejs
