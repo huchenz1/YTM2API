@@ -27,7 +27,8 @@ def track(video_id, title="T", artist="A", album="AL", seconds=200):
 def parseable_cookies(tmp_path):
     path = tmp_path / "cookies.txt"
     path.write_text(
-        "#HttpOnly_.youtube.com\tTRUE\t/\tTRUE\t2000000000\tSAPISID\tsv\n",
+        "#HttpOnly_.youtube.com\tTRUE\t/\tTRUE\t2000000000\tSAPISID\tsv\n"
+        "#HttpOnly_.youtube.com\tTRUE\t/\tTRUE\t2000000000\t__Secure-3PAPISID\t3pv\n",
         encoding="utf-8")
     return str(path)
 
